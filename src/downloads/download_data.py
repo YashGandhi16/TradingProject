@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import yfinance as yf
 from datetime import timedelta
-from pathlib import Path
 from dotenv import load_dotenv
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
@@ -14,19 +13,22 @@ API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 
 # 2. Define Time Windows
-# Macro window: 2 years back for 200-day SMAs & weekly trends
 MACRO_DAYS_BEFORE = 730
 MACRO_DAYS_AFTER = 30
 
-# Intraday window: 14 calendar days back (~10 trading days) gives ample 
-# warm-up for an 8-period EMA on a 5-minute chart without downloading gigabytes of unneeded data.
 INTRADAY_DAYS_BEFORE = 14
 INTRADAY_DAYS_AFTER = 5
+
+# 3. Define robust project paths using os
+# This dynamically calculates the path back up to your root trading-pattern-ai/ folder
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CSV_PATH = os.path.join(BASE_DIR, "data", "trades.csv")
+RAW_DIR = os.path.join(BASE_DIR, "data", "raw_dataset")
 
 def initialize_alpaca():
     """Validates and initializes the Alpaca historical client."""
     if not API_KEY or not SECRET_KEY:
-        print("Error: Alpaca API keys not found. Check your .env file.")
+        raise ValueError("Error: Alpaca API keys not found. Check your .env file.");
         return None
     return StockHistoricalDataClient(API_KEY, SECRET_KEY)
 
@@ -39,14 +41,13 @@ def download_trade_data():
         return
 
     # Ensure output directories exist
-    raw_dir = Path("data/raw")
-    raw_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(RAW_DIR, exist_ok=True)
 
-    print("Loading trades from data/trades.csv...")
+    print(f"Loading trades from {CSV_PATH}...")
     try:
-        trades = pd.read_csv("data/trades.csv")
+        trades = pd.read_csv(CSV_PATH)
     except FileNotFoundError:
-        print("Error: Could not find data/trades.csv. Run this script from your project root.")
+        print(f"Error: Could not find {CSV_PATH}.")
         return
 
     trades['Date'] = pd.to_datetime(trades['Date'])
@@ -59,8 +60,8 @@ def download_trade_data():
         print(f"\n--- Processing Trade {trade_id}: {ticker} on {trade_date.strftime('%Y-%m-%d')} ---")
 
         # Create dedicated directory for this trade
-        trade_dir = raw_dir / str(trade_id)
-        trade_dir.mkdir(exist_ok=True)
+        trade_dir = os.path.join(RAW_DIR, str(trade_id))
+        os.makedirs(trade_dir, exist_ok=True)
 
         # Calculate macro time window (yfinance)
         macro_start = trade_date - timedelta(days=MACRO_DAYS_BEFORE)
@@ -69,7 +70,8 @@ def download_trade_data():
         # 1. Daily Data (Yahoo Finance)
         daily_df = yf.download(ticker, start=macro_start, end=macro_end, interval="1d", progress=False)
         if not daily_df.empty:
-            daily_df.to_csv(trade_dir / "daily.csv")
+            daily_path = os.path.join(trade_dir, "daily.csv")
+            daily_df.to_csv(daily_path)
             print("  [+] Saved daily.csv (yfinance)")
         else:
             print(f"  [!] Warning: No daily data found for {ticker}")
@@ -77,7 +79,8 @@ def download_trade_data():
         # 2. Weekly Data (Yahoo Finance)
         weekly_df = yf.download(ticker, start=macro_start, end=macro_end, interval="1wk", progress=False)
         if not weekly_df.empty:
-            weekly_df.to_csv(trade_dir / "weekly.csv")
+            weekly_path = os.path.join(trade_dir, "weekly.csv")
+            weekly_df.to_csv(weekly_path)
             print("  [+] Saved weekly.csv (yfinance)")
         else:
             print(f"  [!] Warning: No weekly data found for {ticker}")
@@ -98,7 +101,8 @@ def download_trade_data():
             intraday_df = bars.df
 
             if not intraday_df.empty:
-                intraday_df.to_csv(trade_dir / "intraday_5m.csv")
+                intraday_path = os.path.join(trade_dir, "intraday_5m.csv")
+                intraday_df.to_csv(intraday_path)
                 print("  [+] Saved intraday_5m.csv (Alpaca)")
             else:
                 print(f"  [!] Warning: Alpaca returned empty 5-min data for {ticker}")

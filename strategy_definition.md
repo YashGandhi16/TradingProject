@@ -31,7 +31,8 @@ Volume Candle Rules-
 Volume should decrease during 1D consolidation
 Volume on breakout should be > Average volume
 ––––––––––
-Profit targets: 2R on trades with medium-high confidence, 1.5R on trades with lower confidence. Risk amount should be the distance to 21 ema from entry point.
+Profit targets: 2R on trades with extemely-high confidence, 1.5R on situations with at least one confluence against the trade. Risk amount should be the distance to 21 ema from entry point.
+
 Exit trade: when 1D candle is below 8EMA 15 minutes before market close
 ––––––––––
 Avoid stocks w/ price < $5.00
