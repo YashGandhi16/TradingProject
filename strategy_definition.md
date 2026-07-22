@@ -141,7 +141,7 @@ Successful trades:
 	- clear uptrend in 1D prior to consolidation
 	- 5 min extremely high volume when crossing B/O trendline
 
-15. Win 15: ARC 05/26/2025
+15. Win 15: ARC 05/26/2025(data not showing up in API's)
 	- 1D decreasing volume during the consolidation. consolidation dever drops below the 21 EMA; 8EMA> 21EMA> 50EMA;
 	- Clear uptrend in 1D before the consolidation which is good because this is a continuation pattern, spanning 1 month
 	- On day of the first trendline breakout, in the 1W, 8EMA>50EMA>21EMA; this is a no-buy because the 21 EMA is $0.07 below the 50EMA. 

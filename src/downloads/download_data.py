@@ -22,15 +22,53 @@ INTRADAY_DAYS_AFTER = 5
 # 3. Define robust project paths using os
 # This dynamically calculates the path back up to your root trading-pattern-ai/ folder
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CSV_PATH = os.path.join(BASE_DIR, "data", "trades.csv")
+CSV_PATH = os.path.join(BASE_DIR, "data", "trades_scaled.csv")
 RAW_DIR = os.path.join(BASE_DIR, "data", "raw_dataset")
 
 def initialize_alpaca():
     """Validates and initializes the Alpaca historical client."""
     if not API_KEY or not SECRET_KEY:
-        raise ValueError("Error: Alpaca API keys not found. Check your .env file.");
-        return None
+        raise ValueError("Error: Alpaca API keys not found. Check your .env file.")
     return StockHistoricalDataClient(API_KEY, SECRET_KEY)
+
+def format_yfinance_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Flattens yFinance multi-level headers and standardizes columns."""
+    df = df.copy()
+    
+    # Flatten MultiIndex columns if yFinance exported Ticker as the second level
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+        
+    # Standardize column names
+    df.columns = df.columns.str.lower()
+    df.index.name = 'date'
+    
+    # Keep only essential columns to match our standard schema
+    expected_cols = ['open', 'high', 'low', 'close', 'volume']
+    df = df[[c for c in expected_cols if c in df.columns]]
+    
+    return df
+
+def format_alpaca_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Extracts timestamp from multi-index and standardizes columns."""
+    df = df.copy()
+    
+    # Alpaca returns a MultiIndex of (symbol, timestamp). We want timestamp as the sole index.
+    df = df.reset_index()
+    
+    # Rename and set the index
+    if 'timestamp' in df.columns:
+        df = df.rename(columns={'timestamp': 'date'})
+    df = df.set_index('date')
+    
+    # Standardize column names
+    df.columns = df.columns.str.lower()
+    
+    # Drop unwanted metadata columns to match yfinance schema
+    cols_to_drop = ['symbol', 'trade_count', 'vwap']
+    df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
+    
+    return df
 
 def download_trade_data():
     """Reads trades.csv and downloads daily, weekly, and 5-min historical data."""
@@ -50,14 +88,15 @@ def download_trade_data():
         print(f"Error: Could not find {CSV_PATH}.")
         return
 
-    trades['Date'] = pd.to_datetime(trades['Date'])
+    # Using Entry_Time from the updated CSV format
+    trades['Entry_Time'] = pd.to_datetime(trades['Entry_Time'])
 
     for index, row in trades.iterrows():
         trade_id = row['Trade_ID']
         ticker = row['Ticker']
-        trade_date = row['Date']
+        trade_date = row['Entry_Time']
 
-        print(f"\n--- Processing Trade {trade_id}: {ticker} on {trade_date.strftime('%Y-%m-%d')} ---")
+        print(f"\n--- Processing Trade {trade_id}: {ticker} on {trade_date.strftime('%Y-%m-%d %H:%M')} ---")
 
         # Create dedicated directory for this trade
         trade_dir = os.path.join(RAW_DIR, str(trade_id))
@@ -70,6 +109,7 @@ def download_trade_data():
         # 1. Daily Data (Yahoo Finance)
         daily_df = yf.download(ticker, start=macro_start, end=macro_end, interval="1d", progress=False)
         if not daily_df.empty:
+            daily_df = format_yfinance_df(daily_df)
             daily_path = os.path.join(trade_dir, "daily.csv")
             daily_df.to_csv(daily_path)
             print("  [+] Saved daily.csv (yfinance)")
@@ -79,6 +119,7 @@ def download_trade_data():
         # 2. Weekly Data (Yahoo Finance)
         weekly_df = yf.download(ticker, start=macro_start, end=macro_end, interval="1wk", progress=False)
         if not weekly_df.empty:
+            weekly_df = format_yfinance_df(weekly_df)
             weekly_path = os.path.join(trade_dir, "weekly.csv")
             weekly_df.to_csv(weekly_path)
             print("  [+] Saved weekly.csv (yfinance)")
@@ -101,6 +142,7 @@ def download_trade_data():
             intraday_df = bars.df
 
             if not intraday_df.empty:
+                intraday_df = format_alpaca_df(intraday_df)
                 intraday_path = os.path.join(trade_dir, "intraday_5m.csv")
                 intraday_df.to_csv(intraday_path)
                 print("  [+] Saved intraday_5m.csv (Alpaca)")
@@ -111,7 +153,7 @@ def download_trade_data():
             print(f"  [X] Alpaca download error for {ticker}: {e}")
 
     print("\n==========================================")
-    print("All downloads complete! Check data/raw/")
+    print("All downloads complete! Check data/raw_dataset/")
     print("==========================================")
 
 if __name__ == "__main__":
