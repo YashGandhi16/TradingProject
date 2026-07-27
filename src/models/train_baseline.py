@@ -1,5 +1,6 @@
 import sqlite3
 import pandas as pd
+import os
 import xgboost as xgb
 from sklearn.metrics import classification_report, confusion_matrix, precision_score
 
@@ -101,6 +102,21 @@ def main():
     else:
         print(cm)
 
+    # --- NEW: Print exact trades the model took ---
+    print("\n--- Trades the Model 'Took' (Buy Signals on Test Set) ---")
+    results_df = test_df[['trade_id', 'ticker', target_col]].copy()
+    results_df['Entry_Time'] = test_df.index.strftime('%Y-%m-%d %H:%M') # Pull Entry Time from index
+    results_df['Predicted'] = y_pred
+    results_df['Actual_Outcome'] = results_df[target_col].apply(lambda x: "WIN" if x == 1 else "LOSS (Trap)")
+    
+    trades_taken = results_df[results_df['Predicted'] == 1]
+    
+    if trades_taken.empty:
+        print("The model did not take any trades in the test set.")
+    else:
+        display_cols = ['Entry_Time', 'ticker', 'trade_id', 'Actual_Outcome']
+        print(trades_taken[display_cols].to_string(index=False))
+
     # 6. Feature Importance Extract
     print("\n--- Top 15 Most Important Features ---")
     importance_df = pd.DataFrame({
@@ -115,6 +131,10 @@ def main():
     print(f"\nYour Manual Checklist Features provided {importance_df[importance_df['Feature'].isin(manual_features_used)]['Importance'].sum():.1%} of the model's total decision power!")
     
     print("\n--- Training Complete ---")
+    # Save trained model for live screener
+    os.makedirs("data/models", exist_ok=True)
+    model.save_model("data/models/xgb_model.json")
+    print("Model saved to data/models/xgb_model.json")
 
 if __name__ == "__main__":
     main()
