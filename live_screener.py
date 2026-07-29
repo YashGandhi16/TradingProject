@@ -140,7 +140,9 @@ def scan_market():
                     'macro_breakout_gap_pct': macro_breakout_gap_pct,
                     'macro_vol_contraction_ratio': macro_vol_contraction_ratio,
                     'intraday_rvol': intraday_rvol,
-                    'intraday_vol_contraction_ratio': 1.0,  # Default fallback placeholder
+                    'intraday_vol_contraction_ratio': 1.0,
+                    'VCP_ATR_Ratio': 1.0,        # <-- ADD THIS PLACEHOLDER
+                    'SPY_Trend_Valid': 1,        # <-- ADD THIS PLACEHOLDER
                     **checklist
                 }
                 

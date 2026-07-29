@@ -126,9 +126,9 @@ def main():
     
     print(importance_df.head(15).to_string(index=False))
     
-    # Highlight how well the manual checklist performed
-    manual_features_used = [f for f in features if any(x in f for x in ['Valid', 'Contracting', 'Spike', 'Consol'])]
-    print(f"\nYour Manual Checklist Features provided {importance_df[importance_df['Feature'].isin(manual_features_used)]['Importance'].sum():.1%} of the model's total decision power!")
+    # Highlight how well the automated mathematical checklist performed
+    math_features_used = [f for f in features if any(x in f for x in ['Valid', 'Contracting', 'Spike', 'Consol', 'ATR'])]
+    print(f"\nYour Automated Mathematical Checklist provided {importance_df[importance_df['Feature'].isin(math_features_used)]['Importance'].sum():.1%} of the model's total decision power!")
     
     print("\n--- Training Complete ---")
     # Save trained model for live screener

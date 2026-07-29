@@ -23,12 +23,13 @@ def main():
 
     all_processed_data = []
     
-    # Define the manual checklist columns we want to inject into the dataset
-    manual_features = [
+    # Define the CSV features we want to inject into the dataset
+    csv_features = [
         '1W_Trend_Valid', '1D_Trend_Valid', '1D_Volume_Contracting',
         'Breakout_Open_Valid', 'Intraday_Volume_Spike',
         'Consol_Close_Below_8EMA', 'Consol_Close_Below_21EMA',
-        'Consol_Close_Below_50EMA', '>=6_days_consol'
+        'Consol_Close_Below_50EMA', '>=6_days_consol',
+        'VCP_ATR_Ratio', 'SPY_Trend_Valid'
     ]
 
     # 2. Iterate over every trade in the CSV
@@ -107,15 +108,14 @@ def main():
         final_trade_df.loc[:, 'ticker'] = ticker
         final_trade_df.loc[:, 'trade_id'] = trade_id
         
-        # 2. Checklist Features (1s and 0s)
-        for col in manual_features:
+        # 2. Checklist & Math Features
+        for col in csv_features:
             if col in row:
-                # Convert True/False or numbers to integers
                 val = row[col]
                 if isinstance(val, bool) or str(val).upper() in ['TRUE', 'FALSE']:
-                    final_trade_df.loc[:, col] = 1 if str(val).upper() == 'TRUE' else 0
+                    final_trade_df.loc[:, col] = 1.0 if str(val).upper() == 'TRUE' else 0.0
                 else:
-                    final_trade_df.loc[:, col] = int(val)
+                    final_trade_df.loc[:, col] = float(val)
                 
         # 3. Ground Truth Override (CRITICAL)
         if 'Outcome' in row and pd.notna(row['Outcome']):
