@@ -9,7 +9,6 @@ def main():
     print("--- Starting Batch Feature Pipeline ---")
 
     # 1. Load the master registry from your trades_scaled.csv file
-    # Check both names just in case
     trades_path = "data/trades_scaled.csv"
     if not os.path.exists(trades_path):
         trades_path = "data/trades.csv"
@@ -29,7 +28,7 @@ def main():
         'Breakout_Open_Valid', 'Intraday_Volume_Spike',
         'Consol_Close_Below_8EMA', 'Consol_Close_Below_21EMA',
         'Consol_Close_Below_50EMA', '>=6_days_consol',
-        'VCP_ATR_Ratio', 'SPY_Trend_Valid'
+        'VCP_ATR_Ratio', 'SPY_Trend_Valid', 'Sector_Trend_Valid'
     ]
 
     # 2. Iterate over every trade in the CSV
@@ -38,7 +37,6 @@ def main():
         if 'Trade_ID' in row and pd.notna(row['Trade_ID']):
             trade_id = str(row['Trade_ID']).strip()
         else:
-            # Fallback if Trade_ID is missing
             trade_id = f"{row['Ticker']}_{index}"
             
         ticker = str(row['Ticker']).strip()
@@ -77,27 +75,25 @@ def main():
         )
         
         # --- ISOLATE THE EXACT BREAKOUT BAR ---
-        # The new CSV uses 'Date', the old used 'Entry_Time'. Let's check both.
-        timestamp_col = 'Date' if 'Date' in row else 'Entry_Time'
+        # NEW FIX: Explicitly target Entry_Time to avoid midnight defaults from 'Date'
+        timestamp_col = 'Entry_Time'
         
         if timestamp_col in row and pd.notna(row[timestamp_col]):
             entry_time = pd.to_datetime(str(row[timestamp_col]).strip())
             
             # Find the exact match or nearest preceding 5m bar
             if entry_time in final_trade_df.index:
-                final_trade_df = final_trade_df.loc[[entry_time]].copy() # ADDED .copy()
+                final_trade_df = final_trade_df.loc[[entry_time]].copy()
             else:
-                # If exact minute isn't found, find the closest bar immediately before it
                 past_bars = final_trade_df[final_trade_df.index <= entry_time]
                 if not past_bars.empty:
-                    final_trade_df = past_bars.tail(1).copy() # ADDED .copy()
+                    final_trade_df = past_bars.tail(1).copy()
                 else:
                     final_trade_df = pd.DataFrame()
         else:
-            # Only use math logic if human timestamp is totally missing
             final_trade_df['rolling_high_20'] = final_trade_df['high'].rolling(20).max().shift(1)
             breakout_mask = final_trade_df['close'] > final_trade_df['rolling_high_20']
-            final_trade_df = final_trade_df[breakout_mask].head(1).copy() # ADDED .copy()
+            final_trade_df = final_trade_df[breakout_mask].head(1).copy()
             
         if final_trade_df.empty:
             print(f"  [!] Skipping {trade_id}: Could not match your timestamp to the 5-min dataset.")
@@ -137,12 +133,40 @@ def main():
     master_df = pd.concat(all_processed_data)
     master_df = master_df.sort_index()
 
+    # --- DATA IMPUTATION BLOCK (RESCUING THE DROPPED ROWS) ---
+    print("\nImputing missing intraday & checklist features...")
+    
+    if 'intraday_rvol' in master_df.columns:
+        master_df['intraday_rvol'] = master_df['intraday_rvol'].fillna(master_df['intraday_rvol'].median())
+
+    if 'intraday_vol_contraction_ratio' in master_df.columns:
+        master_df['intraday_vol_contraction_ratio'] = master_df['intraday_vol_contraction_ratio'].fillna(1.0)
+
+    if 'macro_breakout_gap_pct' in master_df.columns:
+        master_df['macro_breakout_gap_pct'] = master_df['macro_breakout_gap_pct'].fillna(0.0)
+
+    # Rescue the blank checklist features from the miner script
+    checklist_cols = [
+        '1W_Trend_Valid', '1D_Trend_Valid', '1D_Volume_Contracting',
+        'Breakout_Open_Valid', 'Intraday_Volume_Spike',
+        'Consol_Close_Below_8EMA', 'Consol_Close_Below_21EMA',
+        'Consol_Close_Below_50EMA', '>=6_days_consol', 'SPY_Trend_Valid'
+    ]
+    for col in checklist_cols:
+        if col in master_df.columns:
+            master_df[col] = master_df[col].fillna(0.0)
+
+    # Now drop any rows that are genuinely broken (missing core daily math)
+    master_df = master_df.dropna()
+    print(f"Final dataset size compiled for XGBoost: {len(master_df)} rows")
+    # -------------------------------------------------------------
+
     # 8. Split chronologically, save to Parquet, and log to SQLite
-    print("Saving datasets and registering metadata...")
+    print("\nSaving datasets and registering metadata...")
     save_and_register_dataset(
         df=master_df,
         ticker="ALL_TRADES_HYBRID", 
-        dataset_version="v2_human_verified"
+        dataset_version="v3_true_rs" # <-- NEW VERSION
     )
 
     print("--- Pipeline Complete! ---")
