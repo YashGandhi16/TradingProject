@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import yfinance as yf
-from datetime import timedelta
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
@@ -90,6 +90,10 @@ def download_trade_data():
 
     # Using Entry_Time from the updated CSV format
     trades['Entry_Time'] = pd.to_datetime(trades['Entry_Time'])
+    now = datetime.now()
+    
+    # Set yfinance 60-day limit cutoff (using 59 days for a safety buffer)
+    yfinance_cutoff = now - timedelta(days=59)
 
     for index, row in trades.iterrows():
         trade_id = row['Trade_ID']
@@ -126,31 +130,46 @@ def download_trade_data():
         else:
             print(f"  [!] Warning: No weekly data found for {ticker}")
 
-        # Calculate intraday time window (Alpaca)
+        # Calculate intraday time window
         intraday_start = trade_date - timedelta(days=INTRADAY_DAYS_BEFORE)
         intraday_end = trade_date + timedelta(days=INTRADAY_DAYS_AFTER)
 
-        # 3. 5-Minute Intraday Data (Alpaca)
-        try:
-            request_params = StockBarsRequest(
-                symbol_or_symbols=[ticker],
-                timeframe=TimeFrame(5, TimeFrameUnit.Minute),
-                start=intraday_start,
-                end=intraday_end
-            )
-            bars = alpaca_client.get_stock_bars(request_params)
-            intraday_df = bars.df
+        # 3. 5-Minute Intraday Data (Dynamic Routing)
+        if intraday_start >= yfinance_cutoff:
+            print("  [*] Recent trade detected. Routing 5-min data through yfinance...")
+            try:
+                intraday_df = yf.download(ticker, start=intraday_start, end=intraday_end, interval="5m", prepost=True, progress=False)
+                if not intraday_df.empty:
+                    intraday_df = format_yfinance_df(intraday_df)
+                    intraday_path = os.path.join(trade_dir, "intraday_5m.csv")
+                    intraday_df.to_csv(intraday_path)
+                    print("  [+] Saved intraday_5m.csv (yfinance)")
+                else:
+                    print(f"  [!] Warning: yfinance returned empty 5-min data for {ticker}")
+            except Exception as e:
+                print(f"  [X] yfinance download error for {ticker}: {e}")
+        else:
+            print("  [*] Historical trade detected. Routing 5-min data through Alpaca SIP...")
+            try:
+                request_params = StockBarsRequest(
+                    symbol_or_symbols=[ticker],
+                    timeframe=TimeFrame(5, TimeFrameUnit.Minute),
+                    start=intraday_start,
+                    end=intraday_end
+                )
+                bars = alpaca_client.get_stock_bars(request_params)
+                intraday_df = bars.df
 
-            if not intraday_df.empty:
-                intraday_df = format_alpaca_df(intraday_df)
-                intraday_path = os.path.join(trade_dir, "intraday_5m.csv")
-                intraday_df.to_csv(intraday_path)
-                print("  [+] Saved intraday_5m.csv (Alpaca)")
-            else:
-                print(f"  [!] Warning: Alpaca returned empty 5-min data for {ticker}")
-                
-        except Exception as e:
-            print(f"  [X] Alpaca download error for {ticker}: {e}")
+                if not intraday_df.empty:
+                    intraday_df = format_alpaca_df(intraday_df)
+                    intraday_path = os.path.join(trade_dir, "intraday_5m.csv")
+                    intraday_df.to_csv(intraday_path)
+                    print("  [+] Saved intraday_5m.csv (Alpaca)")
+                else:
+                    print(f"  [!] Warning: Alpaca returned empty 5-min data for {ticker}")
+                    
+            except Exception as e:
+                print(f"  [X] Alpaca download error for {ticker}: {e}")
 
     print("\n==========================================")
     print("All downloads complete! Check data/raw_dataset/")
