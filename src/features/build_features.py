@@ -13,35 +13,21 @@ def build_macro_features(df: pd.DataFrame) -> pd.DataFrame:
     df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['vol_sma_20'] = df['volume'].rolling(window=20).mean()
     
-    # --- YASH'S ALPHA FEATURES (Translated from Markdown) ---
-    
-    # Alpha 1: Strict EMA Alignment (8 > 21 > 50)
-    # 1 if true (perfect uptrend), 0 if false (like Loss 04, Loss 07, Loss 09)
+    # Alpha features
     df['ema_alignment_flag'] = ((df['ema_8'] > df['ema_21']) & (df['ema_21'] > df['ema_50'])).astype(int)
-    
-    # Alpha 2: Breakout Open Position
-    # Did today's daily candle open above the 8 EMA? (Seen in Win 03, Win 11, Win 13)
     df['open_above_8ema_flag'] = (df['open'] > df['ema_8']).astype(int)
-    
-    # Alpha 3: Trend Strength (Gap between EMAs)
-    # Measures how "far" price is above the EMAs (Seen in Win 04 KEEL, Win 05 DELL)
     df['ema_8_21_spread_pct'] = (df['ema_8'] - df['ema_21']) / df['ema_21']
     df['ema_21_50_spread_pct'] = (df['ema_21'] - df['ema_50']) / df['ema_50']
-    
-    # Alpha 4: Volume Contraction during Consolidation
-    # How many of the last 5 days had volume BELOW the 20-day average?
-    # 4 or 5 means beautiful consolidation. 0 means warning (Loss 01 RGTI).
     df['is_low_vol_day'] = (df['volume'] < df['vol_sma_20']).astype(int)
     df['days_below_avg_vol_5d'] = df['is_low_vol_day'].rolling(window=5).sum()
     
-    # --------------------------------------------------------
-    
-    # General volatility and gap features
+    # General volatility and gap features (exact names required by merge_features.py)
     df['vol_contraction_ratio'] = df['volume'] / df['vol_sma_20']
-    df['pdh'] = df['high'].shift(1) # Previous Day High
-    df['breakout_gap_pct'] = (df['open'] - df['pdh']) / df['pdh']
+    df['pdh'] = df['high'].shift(1)
     
-    # Drop intermediate columns used for math
+    # Safe division to prevent inf values
+    df['breakout_gap_pct'] = np.where(df['pdh'] != 0, (df['open'] - df['pdh']) / df['pdh'], 0.0)
+    
     df.drop(columns=['is_low_vol_day'], inplace=True)
     df.dropna(inplace=True)
     
@@ -49,32 +35,43 @@ def build_macro_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def build_intraday_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Generates 5-minute intraday features.
+    Generates 5-minute intraday micro-structure features (VWAP, Time-of-Day R-Vol).
     """
     df = df.copy()
     
-    # 5-minute EMAs
+    # Ensure index is datetime
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index)
+        
+    # 1. EMAs for Intraday momentum
     df['ema_8'] = df['close'].ewm(span=8, adjust=False).mean()
-    df['ema_21'] = df['close'].ewm(span=21, adjust=False).mean()
-    
-    # 5-minute Volume Average
-    df['vol_sma_20'] = df['volume'].rolling(window=20).mean()
-    
-    # --- YASH'S ALPHA FEATURES ---
-    
-    # Alpha 5: Intraday Explosive Volume Spike
-    # "Massive volume spike above the cloud on the 5 minute" (Win 06 BB, Win 10 USAR)
-    # A score of 3.0 means 300% of average 5m volume.
-    df['intraday_rvol'] = df['volume'] / df['vol_sma_20']
-    
-    # Alpha 6: Pullback to 8 EMA
-    # Distance between current price and the 5-min 8 EMA
     df['price_to_8ema_delta'] = (df['close'] - df['ema_8']) / df['ema_8']
     
-    # -----------------------------
+    # Time-of-day R-Vol
+    df['time'] = df.index.time
+    df['hist_time_vol'] = df.groupby('time')['volume'].transform(lambda x: x.shift(1).rolling(10, min_periods=1).mean())
     
-    # Standard intraday volatility ratio
-    df['intraday_vol_contraction_ratio'] = df['volume'] / df['vol_sma_20']
+    df['intraday_rvol'] = np.where(
+        (df['hist_time_vol'] > 0) & (df['hist_time_vol'].notna()), 
+        df['volume'] / df['hist_time_vol'], 
+        1.0
+    )
+    
+    # VWAP and VWAP stretch calculation
+    df['trade_date'] = df.index.date
+    df['typical_price'] = (df['high'] + df['low'] + df['close']) / 3
+    df['pv'] = df['typical_price'] * df['volume']
+    
+    df['cum_pv'] = df.groupby('trade_date')['pv'].cumsum()
+    df['cum_vol'] = df.groupby('trade_date')['volume'].cumsum()
+    
+    df['vwap'] = np.where(df['cum_vol'] > 0, df['cum_pv'] / df['cum_vol'], df['close'])
+    df['vwap_stretch_pct'] = np.where(df['vwap'] > 0, ((df['close'] - df['vwap']) / df['vwap']) * 100, 0.0)
+    
+    df['intraday_vol_contraction_ratio'] = 1.0 
+    
+    cols_to_drop = ['time', 'hist_time_vol', 'trade_date', 'typical_price', 'pv', 'cum_pv', 'cum_vol', 'vwap']
+    df.drop(columns=[c for c in cols_to_drop if c in df.columns], inplace=True)
     
     df.dropna(inplace=True)
     return df

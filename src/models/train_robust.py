@@ -34,22 +34,39 @@ def train_robust():
     
     train = pd.read_parquet(train_path)
     test = pd.read_parquet(test_path)
+    
+    # --- DATA SCAVENGER ---
+    val_files = ["val.parquet", "validation.parquet", "holdout.parquet"]
+    for v_file in val_files:
+        v_path = os.path.join(latest_folder, v_file)
+        if os.path.exists(v_path):
+            v_df = pd.read_parquet(v_path)
+            train = pd.concat([train, v_df], ignore_index=True)
+            print(f"[*] Scavenger Discovered {v_file}! Injected {len(v_df)} extra rows into Train Set.")
 
     train = train.replace([np.inf, -np.inf], np.nan).fillna(0)
     test = test.replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    print(f"Loaded Train: {len(train)} rows")
+    print(f"\nLoaded Train: {len(train)} rows")
     print(f"Loaded Test:  {len(test)} rows")
     print(f"Total Model Pipeline: {len(train) + len(test)} rows\n")
 
+    # 13 Pruned Features (dropped the 4 dead zero-weight columns)
     features = [
-        'VCP_ATR_Ratio', '1D_Trend_Valid', 'Consol_Close_Below_50EMA', 
-        'Breakout_Open_Valid', '1D_Volume_Contracting', 'intraday_rvol', 
-        'macro_vol_contraction_ratio', 'macro_breakout_gap_pct', 
-        'price_to_8ema_delta', '1W_Trend_Valid', 'intraday_vol_contraction_ratio', 
-        'Intraday_Volume_Spike', 'Consol_Close_Below_8EMA', 
-        'Consol_Close_Below_21EMA', '>=6_days_consol', 'SPY_Trend_Valid', 
-        'Sector_Trend_Valid'
+        '1W_Trend_Valid', 
+        'SPY_Trend_Valid', 
+        'price_to_8ema_delta', 
+        'Sector_Trend_Valid', 
+        'intraday_rvol', 
+        'macro_breakout_gap_pct', 
+        'macro_vol_contraction_ratio', 
+        'Consol_Close_Below_21EMA', 
+        '>=6_days_consol', 
+        'Breakout_Open_Valid', 
+        'VCP_ATR_Ratio', 
+        'Intraday_Volume_Spike', 
+        '1D_Volume_Contracting',
+        'vwap_stretch_pct' # <--- THE NEW TIE BREAKER
     ]
     
     for col in features:
@@ -60,18 +77,21 @@ def train_robust():
     X_train, y_train = train[features], train['target']
     X_test, y_test = test[features], test['target']
 
-    print(f"Training on {len(features)} features across {len(X_train)} train rows...\n")
+    print(f"Training on {len(features)} Features across {len(X_train)} train rows...\n")
 
-    # 2. Define the Base Arrogant Model
+    # 2. Define the Base Model (Optimized via GridSearch)
     base_model = xgb.XGBClassifier(
-        n_estimators=100,
-        learning_rate=0.05,
-        max_depth=3,
+        max_depth=4,
+        learning_rate=0.01,
+        n_estimators=50,
+        min_child_weight=1,
+        subsample=0.7,
+        colsample_bytree=1.0,
         random_state=42,
         eval_metric='logloss'
     )
     
-    # 3. Apply Platt Scaling (Sigmoid Calibration)
+    # 3. Apply Platt Scaling
     print("[*] Applying Platt Scaling (CalibratedClassifierCV)...")
     calibrated_model = CalibratedClassifierCV(estimator=base_model, method='sigmoid', cv=5)
     calibrated_model.fit(X_train, y_train)
@@ -79,8 +99,6 @@ def train_robust():
     # 4. Make Calibrated Predictions
     probs = calibrated_model.predict_proba(X_test)[:, 1]
     
-    # Since confidence is squashed, institutional thresholds are often lowered to 0.45 or 0.40.
-    # We will stick to 0.50 to see the direct impact.
     threshold = 0.50
     preds = (probs >= threshold).astype(int)
 
