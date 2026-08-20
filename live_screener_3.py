@@ -6,6 +6,8 @@ import yfinance as yf
 from datetime import datetime
 import warnings
 import re
+import time
+import requests
 
 # Suppress yfinance warnings for clean terminal output
 warnings.filterwarnings("ignore")
@@ -13,12 +15,20 @@ warnings.filterwarnings("ignore")
 from src.features.build_features import build_macro_features, build_intraday_features
 from src.features.merge_features import align_timeframes
 
+# --- ANTI-BAN ARMOR ---
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5"
+})
+
 def calculate_ema(series, days):
     return series.ewm(span=days, adjust=False).mean()
 
 def main():
     print("="*85)
-    print(" 🦅 INSTITUTIONAL CONTINUATION SCREENER (V5) 🦅 ")
+    print(" 🦅 INSTITUTIONAL CONTINUATION SCREENER (V5 - ARMORED) 🦅 ")
     print("="*85)
     
     model_path = "data/models/calibrated_xgb_model.joblib"
@@ -33,8 +43,8 @@ def main():
     sector_etfs = ['XLK', 'XLE', 'XLF', 'XLY', 'XLP', 'XLV', 'XLI', 'XLC', 'XLU', 'XLRE', 'XLB', 'SPY']
     
     try:
-        # Bulk download all sector ETFs for extreme speed
-        sector_data_raw = yf.download(sector_etfs, period='3mo', progress=False)['Close']
+        # Bulk download all sector ETFs with the spoofed session
+        sector_data_raw = yf.download(sector_etfs, period='3mo', session=session, progress=False)['Close']
         
         sector_returns = {}
         for etf in sector_etfs:
@@ -47,19 +57,17 @@ def main():
                 
         spy_ret = sector_returns.get('SPY', 0.0)
         
-        # Calculate SPY Trend Valid once
         spy_series = sector_data_raw['SPY'].dropna()
         spy_50ema = calculate_ema(spy_series, 50)
         spy_trend_valid = 1.0 if spy_series.iloc[-2] > spy_50ema.iloc[-2] else 0.0
 
-        # Sort and isolate Top 3 Sectors
         sorted_sectors = sorted([e for e in sector_returns.keys() if e != 'SPY'], key=lambda x: sector_returns[x], reverse=True)
         top_3_sectors = sorted_sectors[:3]
         
         print(f"[*] TOP 3 TRENDING SECTORS (20-Day): {', '.join(top_3_sectors)}\n")
         
     except Exception as e:
-        print(f"[!] Warning: Failed to fetch Sector data ({e}). Defaulting to SPY.")
+        print(f"[!] Warning: Failed to fetch Sector data. Defaulting to SPY. Error: {e}")
         sector_returns = {}
         spy_ret = 0.0
         spy_trend_valid = 1.0
@@ -78,6 +86,7 @@ def main():
 
     print(f"[*] Scanning {len(watchlist)} Tickers from {ticker_file}...\n")
     
+    # EXACT 17 BINARY FEATURES
     features_list = [
         'VCP_ATR_Ratio', '1D_Trend_Valid', 'Consol_Close_Below_50EMA', 
         'Breakout_Open_Valid', '1D_Volume_Contracting', 'intraday_rvol', 
@@ -95,15 +104,16 @@ def main():
         'Real Estate': 'XLRE', 'Basic Materials': 'XLB'
     }
 
-    # Telemetry Counters
     stats = {'liquidity': 0, 'downtrend': 0, 'too_far_from_highs': 0, 'not_coiled_enough': 0, 'data_error': 0, 'low_prob': 0, 'passed': 0}
     results = []
 
     for ticker in watchlist:
         try:
-            daily_raw = yf.download(ticker, period='1y', progress=False)
+            # Inject session into the daily download
+            daily_raw = yf.download(ticker, period='1y', session=session, progress=False)
             if daily_raw.empty or len(daily_raw) < 50:
                 stats['data_error'] += 1
+                time.sleep(0.2) # Throttle on failure
                 continue
                 
             if isinstance(daily_raw.columns, pd.MultiIndex):
@@ -116,38 +126,39 @@ def main():
             daily_raw['50EMA'] = calculate_ema(daily_raw['close'], 50)
             daily_raw['Vol_20SMA'] = daily_raw['volume'].rolling(20).mean()
             
-            # 1. LIQUIDITY GATE: Average Dollar Volume > $5M
             adv = daily_raw['Vol_20SMA'].iloc[-1] * current_price
             if adv < 5_000_000:
                 stats['liquidity'] += 1
+                time.sleep(0.1)
                 continue
                 
-            # 2. TREND GATE: Must be above 50 EMA
             if current_price < daily_raw['50EMA'].iloc[-1]:
                 stats['downtrend'] += 1
+                time.sleep(0.1)
                 continue
                 
-            # 3. PROXIMITY GATE: Must be within 8% of 20-Day High
             last_20_days = daily_raw.iloc[-21:-1]
             peak_high = last_20_days['high'].max()
             if current_price < (peak_high * 0.92):
                 stats['too_far_from_highs'] += 1
+                time.sleep(0.1)
                 continue
 
-            # 4. DAYS COILED GATE (The Geometry Guillotine)
             peak_idx = last_20_days['high'].argmax()
             days_since_peak = len(last_20_days) - 1 - peak_idx
             if days_since_peak < 5:
                 stats['not_coiled_enough'] += 1
+                time.sleep(0.1)
                 continue
             
             last_5_days = daily_raw.iloc[-6:-1]
             base_width = (last_5_days['high'].max() - last_5_days['low'].min()) / last_5_days['low'].min()
             
-            # Fetch Intraday and Build XGBoost Features
-            intraday_raw = yf.download(ticker, period='5d', interval='5m', progress=False)
+            # Inject session into the intraday download
+            intraday_raw = yf.download(ticker, period='5d', interval='5m', session=session, progress=False)
             if intraday_raw.empty:
                 stats['data_error'] += 1
+                time.sleep(0.2) # Throttle on failure
                 continue
                 
             if isinstance(intraday_raw.columns, pd.MultiIndex):
@@ -166,17 +177,17 @@ def main():
             prior_day = daily_raw.iloc[-2]
             today = daily_raw.iloc[-1]
             
-            # Map Ticker to ETF Sector for cached comparison
             try:
-                info = yf.Ticker(ticker).info
-                sector_name = info.get('sector', 'Unknown')
+                # Add spoofing to the Ticker info call
+                info_ticker = yf.Ticker(ticker, session=session)
+                sector_name = info_ticker.info.get('sector', 'Unknown')
                 target_etf = sector_map.get(sector_name, 'SPY')
             except:
                 target_etf = 'SPY'
                 
             sector_trend_valid = 1.0 if sector_returns.get(target_etf, -1) > spy_ret else 0.0
             
-            # Build Live Row
+            # Binary Math matching your working branch
             live_bar['1W_Trend_Valid'] = 1.0 if prior_day['close'] > prior_day['50EMA'] else 0.0
             live_bar['1D_Trend_Valid'] = 1.0 if prior_day['close'] > prior_day['21EMA'] else 0.0
             live_bar['1D_Volume_Contracting'] = 1.0 if prior_day['volume'] < prior_day['Vol_20SMA'] else 0.0
@@ -197,12 +208,10 @@ def main():
             X_live = live_bar[features_list]
             prob = model.predict_proba(X_live)[:, 1][0]
             
-            # Keep setups above 35% for the dashboard
             if prob >= 0.35:
                 status = "🔥 ACTIVE BREAKOUT" if current_price >= peak_high else "⏳ PRE-BREAKOUT"
                 signal = "🟢 BUY" if prob >= 0.50 else "🟡 WATCH"
                 
-                # Flag if it's in a top 3 sector
                 sector_display = f"{target_etf} (TOP 3) 🌟" if target_etf in top_3_sectors else target_etf
                 
                 results.append({
@@ -218,8 +227,14 @@ def main():
             else:
                 stats['low_prob'] += 1
                 
+            # Throttle the loop on successful scans
+            time.sleep(0.2)
+            
         except Exception as e:
+            # Unmasked the error so you can see if something else breaks
+            # print(f"[!] Crash on {ticker}: {type(e).__name__} - {str(e)}") 
             stats['data_error'] += 1
+            time.sleep(0.2)
 
     # --- PRINT DASHBOARD ---
     print(f"{'TICKER':<8} | {'SIGNAL':<8} | {'PROB':<5} | {'STATUS':<18} | {'DAYS COILED':<11} | {'BASE WIDTH':<10} | {'SECTOR'}")
