@@ -1,0 +1,10 @@
+alpaca==1.0.0
+joblib==1.5.3
+numba==0.60.0
+numpy==2.5.2
+pandas==3.0.5
+python-dotenv==1.2.3
+pytz==2026.2
+scikit_learn==1.9.0
+xgboost==3.4.1
+yfinance==1.2.0
