@@ -53,20 +53,13 @@ def train_robust():
 
     # 13 Pruned Features (dropped the 4 dead zero-weight columns)
     features = [
-        '1W_Trend_Valid', 
-        'SPY_Trend_Valid', 
-        'price_to_8ema_delta', 
-        'Sector_Trend_Valid', 
-        'intraday_rvol', 
-        'macro_breakout_gap_pct', 
-        'macro_vol_contraction_ratio', 
-        'Consol_Close_Below_21EMA', 
-        '>=6_days_consol', 
-        'Breakout_Open_Valid', 
-        'VCP_ATR_Ratio', 
-        'Intraday_Volume_Spike', 
-        '1D_Volume_Contracting',
-        'vwap_stretch_pct' # <--- THE NEW TIE BREAKER
+        'VCP_ATR_Ratio', '1D_Trend_Valid', 'Consol_Close_Below_50EMA', 
+        'Breakout_Open_Valid', '1D_Volume_Contracting', 'intraday_rvol', 
+        'macro_vol_contraction_ratio', 'macro_breakout_gap_pct', 
+        'price_to_8ema_delta', '1W_Trend_Valid', 'intraday_vol_contraction_ratio', 
+        'Intraday_Volume_Spike', 'Consol_Close_Below_8EMA', 
+        'Consol_Close_Below_21EMA', '>=6_days_consol', 'SPY_Trend_Valid', 
+        'Sector_Trend_Valid'
     ]
     
     for col in features:
