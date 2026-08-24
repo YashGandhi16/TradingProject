@@ -7,21 +7,12 @@ from datetime import datetime
 import warnings
 import re
 import time
-import requests
 
 # Suppress yfinance warnings for clean terminal output
 warnings.filterwarnings("ignore")
 
 from src.features.build_features import build_macro_features, build_intraday_features
 from src.features.merge_features import align_timeframes
-
-# --- ANTI-BAN ARMOR ---
-session = requests.Session()
-session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5"
-})
 
 def calculate_ema(series, days):
     return series.ewm(span=days, adjust=False).mean()
@@ -43,8 +34,8 @@ def main():
     sector_etfs = ['XLK', 'XLE', 'XLF', 'XLY', 'XLP', 'XLV', 'XLI', 'XLC', 'XLU', 'XLRE', 'XLB', 'SPY']
     
     try:
-        # Bulk download all sector ETFs with the spoofed session
-        sector_data_raw = yf.download(sector_etfs, period='3mo', session=session, progress=False)['Close']
+        # Let yfinance handle the session natively
+        sector_data_raw = yf.download(sector_etfs, period='3mo', progress=False)['Close']
         
         sector_returns = {}
         for etf in sector_etfs:
@@ -109,11 +100,10 @@ def main():
 
     for ticker in watchlist:
         try:
-            # Inject session into the daily download
-            daily_raw = yf.download(ticker, period='1y', session=session, progress=False)
+            daily_raw = yf.download(ticker, period='1y', progress=False)
             if daily_raw.empty or len(daily_raw) < 50:
                 stats['data_error'] += 1
-                time.sleep(0.2) # Throttle on failure
+                time.sleep(0.2) 
                 continue
                 
             if isinstance(daily_raw.columns, pd.MultiIndex):
@@ -154,11 +144,10 @@ def main():
             last_5_days = daily_raw.iloc[-6:-1]
             base_width = (last_5_days['high'].max() - last_5_days['low'].min()) / last_5_days['low'].min()
             
-            # Inject session into the intraday download
-            intraday_raw = yf.download(ticker, period='5d', interval='5m', session=session, progress=False)
+            intraday_raw = yf.download(ticker, period='5d', interval='5m', progress=False)
             if intraday_raw.empty:
                 stats['data_error'] += 1
-                time.sleep(0.2) # Throttle on failure
+                time.sleep(0.2) 
                 continue
                 
             if isinstance(intraday_raw.columns, pd.MultiIndex):
@@ -178,8 +167,7 @@ def main():
             today = daily_raw.iloc[-1]
             
             try:
-                # Add spoofing to the Ticker info call
-                info_ticker = yf.Ticker(ticker, session=session)
+                info_ticker = yf.Ticker(ticker)
                 sector_name = info_ticker.info.get('sector', 'Unknown')
                 target_etf = sector_map.get(sector_name, 'SPY')
             except:
@@ -231,8 +219,6 @@ def main():
             time.sleep(0.2)
             
         except Exception as e:
-            # Unmasked the error so you can see if something else breaks
-            # print(f"[!] Crash on {ticker}: {type(e).__name__} - {str(e)}") 
             stats['data_error'] += 1
             time.sleep(0.2)
 
